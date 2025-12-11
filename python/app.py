@@ -4,6 +4,8 @@ Gradio应用主程序
 """
 import gradio as gr
 from PIL import Image
+import os
+import tempfile
 from doubao_service import doubao_service
 from history_manager import history_manager
 
@@ -117,6 +119,94 @@ def download_image() -> str:
         return f"❌ 下载失败：{str(e)}"
 
 
+def process_audio(audio):
+    """
+    处理音频，转换为文字
+    
+    Args:
+        audio: Gradio Audio组件返回的文件路径字符串
+        
+    Returns:
+        (str, str): 识别的文字和状态信息
+    """
+    global current_text
+    
+    if audio is None:
+        return "", "❌ 请先录制音频"
+    
+    try:
+        # Gradio Audio组件（type="filepath"）直接返回文件路径
+        audio_path = None
+        
+        if isinstance(audio, str):
+            # 如果是文件路径，直接使用
+            audio_path = audio
+        elif isinstance(audio, tuple):
+            # 兼容旧版本：如果是元组 (sample_rate, audio_data)
+            sample_rate, audio_data = audio
+            # 创建临时文件
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
+            temp_file.close()
+            audio_path = temp_file.name
+            
+            # 尝试使用soundfile保存
+            try:
+                import soundfile as sf
+                sf.write(audio_path, audio_data, sample_rate)
+            except ImportError:
+                # 如果没有soundfile，使用wave
+                try:
+                    import wave
+                    import numpy as np
+                    # 转换为int16格式
+                    if audio_data.dtype != np.int16:
+                        # 归一化到[-1, 1]范围，然后转换为int16
+                        if audio_data.dtype == np.float32 or audio_data.dtype == np.float64:
+                            audio_data = (audio_data * 32767).astype(np.int16)
+                        else:
+                            audio_data = audio_data.astype(np.int16)
+                    with wave.open(audio_path, 'wb') as wf:
+                        wf.setnchannels(1 if len(audio_data.shape) == 1 else audio_data.shape[1])
+                        wf.setsampwidth(2)  # 16位
+                        wf.setframerate(int(sample_rate))
+                        wf.writeframes(audio_data.tobytes())
+                except Exception as e:
+                    print(f"⚠️ 音频保存失败: {e}")
+                    return "", f"❌ 音频处理失败: {str(e)}"
+        else:
+            return "", "❌ 不支持的音频格式"
+        
+        if not audio_path or not os.path.exists(audio_path):
+            return "", "❌ 音频文件不存在"
+        
+        # 调用语音转文字API
+        print(f"🎤 开始识别音频: {audio_path}")
+        recognized_text = doubao_service.audio_to_text(audio_path)
+        
+        # 更新全局文字
+        current_text = recognized_text
+        
+        # 清理临时文件（如果是我们创建的）
+        if isinstance(audio, tuple) and os.path.exists(audio_path):
+            try:
+                os.unlink(audio_path)
+            except:
+                pass
+        
+        if recognized_text and recognized_text.strip():
+            status = f"✅ 语音识别成功！\n📝 识别文字：{recognized_text}"
+            return recognized_text, status
+        else:
+            return "", "❌ 识别失败，未返回文字"
+            
+    except Exception as e:
+        error_msg = f"❌ 语音识别失败：{str(e)}"
+        print(error_msg)
+        import traceback
+        traceback.print_exc()
+        return "", error_msg
+
+
 # 初始化：加载最后一张图片
 def init_app():
     """初始化应用，加载最后一张历史记录"""
@@ -148,7 +238,34 @@ with gr.Blocks(title="语音转图片生成器") as app:
     
     with gr.Row():
         with gr.Column(scale=1):
-            # 输入区域
+            # 语音输入区域
+            gr.Markdown("### 🎤 语音输入")
+            gr.Markdown("点击下方录音按钮开始录音，再次点击结束录音，然后点击"识别语音"按钮")
+            
+            audio_input = gr.Audio(
+                label="🎙️ 录音（点击开始/结束）",
+                sources=["microphone"],
+                type="filepath",
+                format="mp3"
+            )
+            
+            recognize_btn = gr.Button(
+                "🎯 识别语音",
+                variant="secondary",
+                size="lg"
+            )
+            
+            recognized_text_output = gr.Textbox(
+                label="📝 识别的文字",
+                placeholder="识别的文字将显示在这里，并自动填入下方文字输入框...",
+                lines=3,
+                interactive=True
+            )
+            
+            gr.Markdown("---")
+            gr.Markdown("### ✍️ 文字输入（或使用上方识别的文字）")
+            
+            # 文字输入区域
             text_input = gr.Textbox(
                 label="📝 输入文字描述",
                 placeholder="例如：一只可爱的小猫在花园里玩耍",
@@ -183,6 +300,19 @@ with gr.Blocks(title="语音转图片生成器") as app:
                 download_btn = gr.Button("💾 下载", size="lg")
     
     # 绑定事件
+    # 语音识别事件
+    recognize_btn.click(
+        fn=process_audio,
+        inputs=[audio_input],
+        outputs=[recognized_text_output, status_text]
+    ).then(
+        # 识别完成后，自动将文字填入输入框
+        fn=lambda x: x if x else "",
+        inputs=[recognized_text_output],
+        outputs=[text_input]
+    )
+    
+    # 生成图片事件
     generate_btn.click(
         fn=generate_image,
         inputs=[text_input],

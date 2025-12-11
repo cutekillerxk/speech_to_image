@@ -13,7 +13,7 @@ DOUBAO_API_KEY = os.getenv('DMX_API_KEY') or os.getenv('API_KEY', '')
 DOUBAO_API_BASE_URL = os.getenv('BASE_URL', 'https://ark.cn-beijing.volces.com/api/v3')
 
 # 音频转文字API URL
-STT_URL = os.getenv('STT_URL', '')
+STT_URL = os.getenv('STT_URL', 'https://www.dmxapi.cn/v1/audio/transcriptions')
 
 # 文字生成图片API URL（DMX API）
 TTI_URL = os.getenv('TTI_URL', 'https://www.dmxapi.cn/v1/images/generations')

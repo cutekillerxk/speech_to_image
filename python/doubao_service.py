@@ -1,6 +1,6 @@
 """
 豆包大模型API服务
-实现文字转图片功能（音频转文字功能后续添加）
+实现文字转图片和音频转文字功能
 """
 import requests
 import base64
@@ -29,7 +29,7 @@ class DoubaoService:
     
     def audio_to_text(self, audio_file_path: str):
         """
-        音频转文字（预留接口，等设备到位后实现）
+        音频转文字
         
         Args:
             audio_file_path: 音频文件路径
@@ -42,35 +42,65 @@ class DoubaoService:
             return "这是一段测试文字，用于生成图片"
         
         try:
-            # 使用配置的STT_URL，如果没有则使用默认路径
-            api_url = self.stt_url if self.stt_url else f"{self.base_url}/audio/transcriptions"
+            # 使用配置的STT_URL
+            api_url = self.stt_url if self.stt_url else 'https://www.dmxapi.cn/v1/audio/transcriptions'
+            
+            # 调试信息
+            print(f"🔗 STT请求URL: {api_url}")
+            print(f"📁 音频文件: {audio_file_path}")
             
             # 读取音频文件
             with open(audio_file_path, 'rb') as audio_file:
-                files = {'file': audio_file}
-                data = {
-                    'model': 'doubao-asr'  # 根据实际模型名称调整
-                }
+                # 根据API示例，使用audio.mp3作为文件名
+                files = {"file": ("audio.mp3", audio_file, "audio/mpeg")}
+                payload = {"model": "gpt-4o-transcribe"}
                 
+                headers = {"Authorization": f"Bearer {self.api_key}"}
+                
+                # 发送请求
                 response = requests.post(
                     api_url,
+                    headers=headers,
+                    data=payload,
                     files=files,
-                    data=data,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}"
-                    },
                     timeout=60
                 )
                 
                 response.raise_for_status()
                 result = response.json()
                 
-                # 根据实际API响应格式解析
-                return result.get('text', result.get('result', ''))
+                # 根据API响应格式解析（返回 {"text": "..."}）
+                voice_text = result.get("text", "")
+                if voice_text:
+                    print(f"✅ 识别成功: {voice_text}")
+                    return voice_text
+                else:
+                    print(f"⚠️ API返回空文本: {result}")
+                    return "音频识别失败，未返回文本"
                 
+        except requests.exceptions.HTTPError as e:
+            error_detail = ""
+            if e.response is not None:
+                try:
+                    error_data = e.response.json()
+                    error_detail = f" - {error_data}"
+                    if e.response.status_code == 401:
+                        print("=" * 60)
+                        print("❌ API密钥验证失败 (401 Unauthorized)")
+                        print("请检查 .env 文件中的 DMX_API_KEY 是否正确")
+                        print("=" * 60)
+                except:
+                    error_detail = f" - {e.response.text}"
+            print(f"❌ 音频转文字HTTP错误 ({e.response.status_code if e.response else 'N/A'}): {e}{error_detail}")
+            return "音频识别失败，请检查API密钥和网络连接"
+        except requests.exceptions.RequestException as e:
+            print(f"❌ 音频转文字网络错误: {e}")
+            return "音频识别失败，网络连接错误"
         except Exception as e:
             print(f"❌ 音频转文字错误: {e}")
-            return "音频识别失败，请重试"
+            import traceback
+            traceback.print_exc()
+            return f"音频识别失败: {str(e)}"
     
     def text_to_image(self, text: str):
         """
