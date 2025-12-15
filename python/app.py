@@ -1,3 +1,4 @@
+
 """
 Gradio应用主程序
 简洁的界面，适合小朋友使用
@@ -366,4 +367,3 @@ if __name__ == "__main__":
         inbrowser=True,         # 自动打开浏览器
         theme=gr.themes.Soft()  # 主题设置移到launch方法
     )
-

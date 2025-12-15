@@ -16,7 +16,7 @@ DOUBAO_API_BASE_URL = os.getenv('BASE_URL', 'https://ark.cn-beijing.volces.com/a
 STT_URL = os.getenv('STT_URL', 'https://www.dmxapi.com/v1/audio/transcriptions')
 
 # 文字生成图片API URL（DMX API）
-TTI_URL = os.getenv('TTI_URL', 'https://www.dmxapi.cn/v1/images/generations')
+TTI_URL = os.getenv('TTI_URL', 'https://www.dmxapi.com/v1/images/generations')
 
 # Gemini API 配置
 GEMINI_BASE_URL = os.getenv('GEMINI_BASE_URL', 'https://www.dmxapi.com')

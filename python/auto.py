@@ -80,15 +80,17 @@ def process_audio_and_generate(audio, progress=gr.Progress()):
                     print(f"📁 音频文件已复制到: {audio_path}")
         elif isinstance(audio, tuple):
             sample_rate, audio_data = audio
-            audio_path = os.path.join(AUDIO_DIR, f"audio_{int(time.time() * 1000)}.wav")
+            # 先保存为临时 wav 文件，然后转换为 webm
+            temp_wav_path = os.path.join(AUDIO_DIR, f"temp_{int(time.time() * 1000)}.wav")
+            audio_path = os.path.join(AUDIO_DIR, f"audio_{int(time.time() * 1000)}.webm")
             print(f"📁 保存音频到: {audio_path}")
             print(f"📊 采样率: {sample_rate}, 数据形状: {audio_data.shape if hasattr(audio_data, 'shape') else 'N/A'}")
             
-            # 保存音频文件
+            # 先保存为 wav 文件
             try:
                 import soundfile as sf
-                sf.write(audio_path, audio_data, sample_rate)
-                print("✅ 使用 soundfile 保存音频成功")
+                sf.write(temp_wav_path, audio_data, sample_rate)
+                print("✅ 使用 soundfile 保存临时 wav 成功")
             except ImportError:
                 try:
                     import wave
@@ -98,17 +100,57 @@ def process_audio_and_generate(audio, progress=gr.Progress()):
                             audio_data = (audio_data * 32767).astype(np.int16)
                         else:
                             audio_data = audio_data.astype(np.int16)
-                    with wave.open(audio_path, 'wb') as wf:
+                    with wave.open(temp_wav_path, 'wb') as wf:
                         wf.setnchannels(1 if len(audio_data.shape) == 1 else audio_data.shape[1])
                         wf.setsampwidth(2)
                         wf.setframerate(int(sample_rate))
                         wf.writeframes(audio_data.tobytes())
-                    print("✅ 使用 wave 保存音频成功")
+                    print("✅ 使用 wave 保存临时 wav 成功")
                 except Exception as e:
                     print(f"❌ 音频保存失败: {e}")
                     import traceback
                     traceback.print_exc()
                     return gr.update(value=current_image) if current_image else None
+            
+            # 尝试转换为 webm 格式
+            try:
+                from pydub import AudioSegment
+                # 加载 wav 文件并导出为 webm
+                audio_segment = AudioSegment.from_wav(temp_wav_path)
+                audio_segment.export(audio_path, format="webm")
+                # 删除临时 wav 文件
+                if os.path.exists(temp_wav_path):
+                    os.remove(temp_wav_path)
+                print("✅ 转换为 webm 格式成功")
+            except ImportError:
+                # 如果没有 pydub，尝试使用 ffmpeg
+                try:
+                    import subprocess
+                    subprocess.run([
+                        "ffmpeg", "-i", temp_wav_path, "-c:a", "libopus", 
+                        "-b:a", "64k", audio_path, "-y"
+                    ], check=True, capture_output=True)
+                    # 删除临时 wav 文件
+                    if os.path.exists(temp_wav_path):
+                        os.remove(temp_wav_path)
+                    print("✅ 使用 ffmpeg 转换为 webm 格式成功")
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    # 如果无法转换为 webm，直接使用 wav 文件
+                    print("⚠️ 无法转换为 webm，使用 wav 格式")
+                    audio_path = temp_wav_path
+                    # 重命名为 webm（虽然实际是 wav，但 API 应该能处理）
+                    webm_path = audio_path.replace('.wav', '.webm')
+                    shutil.move(audio_path, webm_path)
+                    audio_path = webm_path
+            except Exception as e:
+                # 如果转换失败，使用 wav 文件
+                print(f"⚠️ 转换为 webm 失败: {e}，使用 wav 格式")
+                audio_path = temp_wav_path
+                # 重命名为 webm（虽然实际是 wav，但 API 应该能处理）
+                webm_path = audio_path.replace('.wav', '.webm')
+                if os.path.exists(audio_path):
+                    shutil.move(audio_path, webm_path)
+                    audio_path = webm_path
         else:
             print(f"❌ 不支持的音频格式: {type(audio)}")
             return gr.update(value=current_image) if current_image else None
@@ -125,8 +167,59 @@ def process_audio_and_generate(audio, progress=gr.Progress()):
         print("🎤 开始语音识别")
         print(f"📁 音频文件: {audio_path}")
         
+        # 如果音频文件是 webm 格式，需要转换为 wav（Whisper API 需要）
+        actual_audio_path = audio_path
+        temp_wav_path = None
+        
+        if audio_path.lower().endswith('.webm'):
+            print("🔄 检测到 webm 格式，转换为 wav 格式以适配 Whisper API...")
+            conversion_success = False
+            temp_wav_path = os.path.join(AUDIO_DIR, f"temp_{int(time.time() * 1000)}.wav")
+            
+            # 方法1：优先尝试直接使用 ffmpeg（最直接的方法）
+            try:
+                import subprocess
+                # 使用 ffmpeg 转换：webm -> wav (16kHz, 单声道, PCM 16位)
+                result = subprocess.run([
+                    "ffmpeg", "-i", audio_path, "-acodec", "pcm_s16le",
+                    "-ar", "16000", "-ac", "1", temp_wav_path, "-y"
+                ], check=True, capture_output=True, timeout=30)
+                actual_audio_path = temp_wav_path
+                conversion_success = True
+                print("✅ 使用 ffmpeg 转换为 wav 成功")
+            except FileNotFoundError:
+                # ffmpeg 未找到，尝试使用 pydub（pydub 也需要 ffmpeg，但可能路径不同）
+                try:
+                    from pydub import AudioSegment
+                    audio_segment = AudioSegment.from_file(audio_path, format="webm")
+                    audio_segment.export(temp_wav_path, format="wav")
+                    actual_audio_path = temp_wav_path
+                    conversion_success = True
+                    print("✅ 使用 pydub 转换为 wav 成功")
+                except (ImportError, Exception) as e:
+                    print(f"⚠️ pydub 转换失败: {e}")
+                    conversion_success = False
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+                print(f"⚠️ ffmpeg 转换失败: {e}")
+                conversion_success = False
+            
+            # 如果转换失败，给出清晰的错误提示
+            if not conversion_success:
+                error_msg = (
+                    "❌ 无法将 webm 转换为 wav 格式\n"
+                    "💡 解决方案：\n"
+                    "   1. 安装 ffmpeg：\n"
+                    "      - Windows: 下载 https://ffmpeg.org/download.html\n"
+                    "      - 或使用: choco install ffmpeg (需要 Chocolatey)\n"
+                    "   2. 将 ffmpeg 添加到系统 PATH 环境变量\n"
+                    "   3. 重启终端后重试\n"
+                    "⚠️ 尝试直接使用 webm 文件（可能失败）"
+                )
+                print(error_msg)
+                # 仍然尝试使用原始文件（可能失败）
+        
         try:
-            recognized_text = doubao_service.audio_to_text(audio_path)
+            recognized_text = doubao_service.audio_to_text(actual_audio_path)
             print(f"✅ 识别成功: {recognized_text}")
             
             if not recognized_text or not recognized_text.strip():
@@ -140,6 +233,14 @@ def process_audio_and_generate(audio, progress=gr.Progress()):
             import traceback
             traceback.print_exc()
             return gr.update(value=current_image) if current_image else None
+        finally:
+            # 清理临时 wav 文件
+            if temp_wav_path and os.path.exists(temp_wav_path):
+                try:
+                    os.remove(temp_wav_path)
+                    print(f"🗑️ 已清理临时文件: {temp_wav_path}")
+                except Exception as e:
+                    print(f"⚠️ 清理临时文件失败: {e}")
         
         # ========== 阶段3: 文本生成完毕 ==========
         if progress:
