@@ -57,7 +57,11 @@ class HistoryManager:
         # 保存图片
         image_filename = f"{record_id}.png"
         image_path = os.path.join(self.history_dir, image_filename)
-        image.save(image_path, 'PNG')
+        # 确保图片是 RGB 模式
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        # 保存图片（不指定格式参数，让 PIL 自动识别）
+        image.save(image_path)
         
         # 创建记录
         record = {

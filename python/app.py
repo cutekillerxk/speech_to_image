@@ -5,10 +5,16 @@ Gradio应用主程序
 import gradio as gr
 from PIL import Image
 import os
-import tempfile
+import time
+import shutil
 from doubao_service import doubao_service
 from history_manager import history_manager
 
+
+# 目录配置
+BASE_DIR = os.path.dirname(__file__)
+AUDIO_DIR = os.path.join(BASE_DIR, "audio")
+os.makedirs(AUDIO_DIR, exist_ok=True)
 
 # 全局状态
 current_image = None
@@ -18,7 +24,7 @@ current_record_id = None
 
 def generate_image(text: str):
     """
-    生成图片
+    生成图片（使用 Gemini 模型，与 ttest.py 一致）
     
     Args:
         text: 文字描述
@@ -32,8 +38,12 @@ def generate_image(text: str):
         return None, "❌ 请输入文字描述"
     
     try:
-        # 调用豆包服务生成图片
-        image, recognized_text = doubao_service.text_to_image(text.strip())
+        # 调用 Gemini 服务生成图片（默认使用 1:1 宽高比，1K 分辨率）
+        image, recognized_text = doubao_service.text_to_image_gemini(
+            text.strip(),
+            aspect_ratio="1:1",
+            image_size="1K"
+        )
         
         # 保存到历史记录
         record = history_manager.add_record(image, recognized_text)
@@ -135,19 +145,20 @@ def process_audio(audio):
         return "", "❌ 请先录制音频"
     
     try:
-        # Gradio Audio组件（type="filepath"）直接返回文件路径
+        # Gradio Audio组件（type="numpy"）返回 (sample_rate, data)；兼容字符串路径
         audio_path = None
         
         if isinstance(audio, str):
-            # 如果是文件路径，直接使用
-            audio_path = audio
+            # 如果是文件路径，复制到 audio 目录
+            if os.path.exists(audio):
+                filename = os.path.basename(audio)
+                dest_path = os.path.join(AUDIO_DIR, filename)
+                shutil.copyfile(audio, dest_path)
+                audio_path = dest_path
         elif isinstance(audio, tuple):
-            # 兼容旧版本：如果是元组 (sample_rate, audio_data)
+            # (sample_rate, audio_data)
             sample_rate, audio_data = audio
-            # 创建临时文件
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
-            temp_file.close()
-            audio_path = temp_file.name
+            audio_path = os.path.join(AUDIO_DIR, f"audio_{int(time.time() * 1000)}.wav")
             
             # 尝试使用soundfile保存
             try:
@@ -185,13 +196,6 @@ def process_audio(audio):
         
         # 更新全局文字
         current_text = recognized_text
-        
-        # 清理临时文件（如果是我们创建的）
-        if isinstance(audio, tuple) and os.path.exists(audio_path):
-            try:
-                os.unlink(audio_path)
-            except:
-                pass
         
         if recognized_text and recognized_text.strip():
             status = f"✅ 语音识别成功！\n📝 识别文字：{recognized_text}"
@@ -240,13 +244,13 @@ with gr.Blocks(title="语音转图片生成器") as app:
         with gr.Column(scale=1):
             # 语音输入区域
             gr.Markdown("### 🎤 语音输入")
-            gr.Markdown("点击下方录音按钮开始录音，再次点击结束录音，然后点击"识别语音"按钮")
+            gr.Markdown("点击下方录音按钮开始录音，再次点击结束录音，然后点击“识别语音”按钮")
             
             audio_input = gr.Audio(
                 label="🎙️ 录音（点击开始/结束）",
                 sources=["microphone"],
-                type="filepath",
-                format="mp3"
+                type="numpy",   # 返回 (sample_rate, data)，避免依赖ffmpeg
+                format="wav"
             )
             
             recognize_btn = gr.Button(
@@ -355,7 +359,8 @@ if __name__ == "__main__":
     print("🚀 启动应用...")
     print("📱 界面将在浏览器中自动打开")
     app.launch(
-        server_name="0.0.0.0",  # 允许外部访问
+        # 如遇到本地代理拦截 localhost，可改为 127.0.0.1
+        server_name="127.0.0.1",
         server_port=7860,        # Gradio默认端口
         share=False,             # 不创建公共链接
         inbrowser=True,         # 自动打开浏览器

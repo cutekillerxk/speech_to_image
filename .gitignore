@@ -50,6 +50,7 @@ pip-delete-this-directory.txt
 
 # Python history and generated files
 python/history/
+python/audio/
 *.png
 *.jpg
 *.jpeg

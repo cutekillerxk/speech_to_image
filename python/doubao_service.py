@@ -8,6 +8,15 @@ from io import BytesIO
 from PIL import Image
 import config
 
+# 尝试导入 Gemini SDK（可选）
+try:
+    from google import genai
+    from google.genai import types
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    print("⚠️ google-genai 未安装，Gemini 图像生成功能不可用")
+
 
 class DoubaoService:
     """豆包API服务类"""
@@ -17,7 +26,21 @@ class DoubaoService:
         self.base_url = config.DOUBAO_API_BASE_URL
         self.stt_url = config.STT_URL  # 音频转文字API URL
         self.tti_url = config.TTI_URL  # 文字生成图片API URL
+        self.gemini_base_url = config.GEMINI_BASE_URL
+        self.gemini_model = config.GEMINI_MODEL
         self.has_api_key = bool(self.api_key)
+        
+        # 初始化 Gemini 客户端（如果可用）
+        self.gemini_client = None
+        if GEMINI_AVAILABLE and self.has_api_key:
+            try:
+                self.gemini_client = genai.Client(
+                    api_key=self.api_key,
+                    http_options={'base_url': self.gemini_base_url}
+                )
+                print(f"✅ Gemini 客户端已初始化")
+            except Exception as e:
+                print(f"⚠️ Gemini 客户端初始化失败: {e}")
         
         # 调试信息：检查API密钥（只显示前10个字符，保护隐私）
         if self.has_api_key:
@@ -42,8 +65,8 @@ class DoubaoService:
             return "这是一段测试文字，用于生成图片"
         
         try:
-            # 使用配置的STT_URL
-            api_url = self.stt_url if self.stt_url else 'https://www.dmxapi.cn/v1/audio/transcriptions'
+            # 使用配置的STT_URL（根据 test.py，使用 .com 域名）
+            api_url = self.stt_url if self.stt_url else 'https://www.dmxapi.com/v1/audio/transcriptions'
             
             # 调试信息
             print(f"🔗 STT请求URL: {api_url}")
@@ -51,17 +74,18 @@ class DoubaoService:
             
             # 读取音频文件
             with open(audio_file_path, 'rb') as audio_file:
-                # 根据API示例，使用audio.mp3作为文件名
-                files = {"file": ("audio.mp3", audio_file, "audio/mpeg")}
-                payload = {"model": "gpt-4o-transcribe"}
+                # 按照网站示例格式：file 直接是文件对象，model 作为表单字段放在 files 中
+                files = {
+                    "file": audio_file,              # 音频文件二进制流
+                    "model": (None, "whisper-1"),   # 指定使用 Whisper-1 模型（表单字段格式）
+                }
                 
                 headers = {"Authorization": f"Bearer {self.api_key}"}
                 
-                # 发送请求
+                # 发送请求（只使用 files 参数，不需要 data 参数）
                 response = requests.post(
                     api_url,
                     headers=headers,
-                    data=payload,
                     files=files,
                     timeout=60
                 )
@@ -102,16 +126,103 @@ class DoubaoService:
             traceback.print_exc()
             return f"音频识别失败: {str(e)}"
     
-    def text_to_image(self, text: str):
+    def text_to_image_gemini(self, text: str, aspect_ratio: str = "1:1", image_size: str = "1K"):
+        """
+        使用 Gemini 模型生成图片
+        
+        Args:
+            text: 文字描述
+            aspect_ratio: 图片宽高比，默认 "1:1"
+            image_size: 图片尺寸，默认 "1K"（支持 "1K", "2K", "4K"）
+            
+        Returns:
+            (PIL.Image, str): 生成的图片对象和原始文字
+        """
+        if not self.has_api_key:
+            return self._mock_text_to_image(text)
+        
+        if not GEMINI_AVAILABLE:
+            print("⚠️ Gemini SDK 未安装，回退到 Doubao 模型")
+            return self.text_to_image(text, use_gemini=False)
+        
+        if not self.gemini_client:
+            print("⚠️ Gemini 客户端未初始化，回退到 Doubao 模型")
+            return self.text_to_image(text, use_gemini=False)
+        
+        try:
+            print(f"🎨 使用 Gemini 模型生成图片")
+            print(f"📝 提示词: {text[:50]}..." if len(text) > 50 else f"📝 提示词: {text}")
+            
+            # 调用 Gemini API
+            # 构建 image_config
+            image_config_dict = {"aspect_ratio": aspect_ratio}
+            # 只有非 1K 时才设置 image_size（1K 是默认值）
+            if image_size != "1K":
+                image_config_dict["image_size"] = image_size
+            
+            response = self.gemini_client.models.generate_content(
+                model=self.gemini_model,
+                contents=[text],
+                config=types.GenerateContentConfig(
+                    response_modalities=['Image'],
+                    image_config=types.ImageConfig(**image_config_dict),
+                )
+            )
+            
+            # 处理响应
+            for part in response.parts:
+                if part.inline_data is not None:
+                    # 将响应数据转换为 PIL Image 对象
+                    image = part.as_image()
+                    # 确保返回的是标准的 PIL Image 对象
+                    # part.as_image() 应该已经返回 PIL Image，但为了安全起见进行验证
+                    if not isinstance(image, Image.Image):
+                        # 如果返回的不是 PIL Image，尝试从数据创建
+                        from io import BytesIO
+                        if hasattr(part.inline_data, 'data'):
+                            image = Image.open(BytesIO(part.inline_data.data))
+                        elif hasattr(part.inline_data, 'mime_type') and 'image' in part.inline_data.mime_type:
+                            # 尝试从 base64 数据创建
+                            import base64
+                            image_data = base64.b64decode(part.inline_data.data)
+                            image = Image.open(BytesIO(image_data))
+                        else:
+                            raise ValueError(f"无法将响应转换为 PIL Image，类型: {type(image)}")
+                    
+                    # 确保图片是 RGB 模式（避免保存时的问题）
+                    if image.mode != 'RGB':
+                        image = image.convert('RGB')
+                    
+                    return image, text
+            
+            # 如果没有找到图片，返回错误
+            raise ValueError("Gemini API 响应中未找到图片数据")
+            
+        except Exception as e:
+            print(f"❌ Gemini 图片生成错误: {e}")
+            import traceback
+            traceback.print_exc()
+            # 回退到 Doubao 模型
+            print("🔄 回退到 Doubao 模型")
+            return self.text_to_image(text, use_gemini=False)
+    
+    def text_to_image(self, text: str, use_gemini: bool = False, aspect_ratio: str = "1:1", image_size: str = "1K"):
         """
         文字生成图片
         
         Args:
             text: 文字描述
+            use_gemini: 是否使用 Gemini 模型，默认 False（使用 Doubao）
+            aspect_ratio: 图片宽高比（仅 Gemini 使用）
+            image_size: 图片尺寸（仅 Gemini 使用）
             
         Returns:
             (PIL.Image, str): 生成的图片对象和原始文字
         """
+        # 如果选择使用 Gemini
+        if use_gemini:
+            return self.text_to_image_gemini(text, aspect_ratio, image_size)
+        
         if not self.has_api_key:
             # 模拟模式：返回占位图片
             return self._mock_text_to_image(text)
