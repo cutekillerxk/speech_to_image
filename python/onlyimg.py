@@ -31,13 +31,14 @@ def process_audio_and_generate(audio, progress=gr.Progress()):
         progress: Gradio进度条对象（自动注入）
         
     Returns:
-        (Image, str): 生成的图片和进度状态
+        gr.update: 使用 gr.update() 保持当前图片，只在成功时更新
     """
     global current_image, current_text, current_record_id
     
     if audio is None:
         print("⚠️ 未检测到音频数据")
-        return None, "等待录音..."
+        # 使用 gr.update() 保持当前图片
+        return gr.update(value=current_image) if current_image else None
     
     try:
         # ========== 阶段1: 音频处理 ==========
@@ -88,14 +89,14 @@ def process_audio_and_generate(audio, progress=gr.Progress()):
                     print(f"❌ 音频保存失败: {e}")
                     import traceback
                     traceback.print_exc()
-                    return None, "音频处理失败"
+                    return gr.update(value=current_image) if current_image else None
         else:
             print(f"❌ 不支持的音频格式: {type(audio)}")
-            return None, "不支持的音频格式"
+            return gr.update(value=current_image) if current_image else None
         
         if not audio_path or not os.path.exists(audio_path):
             print("❌ 音频文件不存在")
-            return None, "音频文件不存在"
+            return gr.update(value=current_image) if current_image else None
         
         # ========== 阶段2: 音频转文字 ==========
         if progress:
@@ -111,7 +112,7 @@ def process_audio_and_generate(audio, progress=gr.Progress()):
             
             if not recognized_text or not recognized_text.strip():
                 print("❌ 识别结果为空")
-                return None, "识别失败，未返回文字"
+                return gr.update(value=current_image) if current_image else None
             
             current_text = recognized_text.strip()
             
@@ -119,7 +120,7 @@ def process_audio_and_generate(audio, progress=gr.Progress()):
             print(f"❌ 语音识别错误: {e}")
             import traceback
             traceback.print_exc()
-            return None, "语音识别失败"
+            return gr.update(value=current_image) if current_image else None
         
         # ========== 阶段3: 文本生成完毕 ==========
         if progress:
@@ -149,7 +150,7 @@ def process_audio_and_generate(audio, progress=gr.Progress()):
             print(f"❌ 图片生成错误: {e}")
             import traceback
             traceback.print_exc()
-            return None, "图片生成失败"
+            return gr.update(value=current_image) if current_image else None
         
         # ========== 阶段5: 保存到历史记录 ==========
         if progress:
@@ -172,21 +173,22 @@ def process_audio_and_generate(audio, progress=gr.Progress()):
         # ========== 完成 ==========
         if progress:
             progress(1.0, desc="完成")
-        progress_status = "完成"
         print("=" * 60)
         print("✅ 流程完成！")
         print(f"📝 文字: {recognized_text}")
         print(f"🖼️ 图片ID: {current_record_id}")
         print("=" * 60)
         
-        return image, progress_status
+        # 成功时返回新图片
+        return gr.update(value=image)
         
     except Exception as e:
         error_msg = f"❌ 处理失败: {str(e)}"
         print(error_msg)
         import traceback
         traceback.print_exc()
-        return None, "处理失败"
+        # 保持当前图片不变，使用 gr.update() 避免清空
+        return gr.update(value=current_image) if current_image else None
 
 
 def get_previous_image():
@@ -195,12 +197,12 @@ def get_previous_image():
     
     if current_record_id is None:
         print("⚠️ 没有当前图片")
-        return None, "等待生成..."
+        return None
     
     current_idx = history_manager.get_current_index(current_record_id)
     if current_idx <= 0:
         print("⚠️ 已经是第一张")
-        return current_image, "已经是第一张"
+        return current_image
     
     prev_record = history_manager.get_record(current_idx - 1)
     if prev_record:
@@ -210,12 +212,12 @@ def get_previous_image():
             current_text = prev_record['text']
             current_record_id = prev_record['id']
             print(f"📸 切换到上一张: {prev_record['text']}")
-            return image, "完成"
+            return image
         except Exception as e:
             print(f"❌ 加载失败: {e}")
-            return current_image, "加载失败"
+            return current_image
     
-    return current_image, "无法加载"
+    return current_image
 
 
 def get_next_image():
@@ -224,14 +226,14 @@ def get_next_image():
     
     if current_record_id is None:
         print("⚠️ 没有当前图片")
-        return None, "等待生成..."
+        return None
     
     current_idx = history_manager.get_current_index(current_record_id)
     history = history_manager.get_history()
     
     if current_idx >= len(history) - 1:
         print("⚠️ 已经是最后一张")
-        return current_image, "已经是最后一张"
+        return current_image
     
     next_record = history_manager.get_record(current_idx + 1)
     if next_record:
@@ -241,12 +243,12 @@ def get_next_image():
             current_text = next_record['text']
             current_record_id = next_record['id']
             print(f"📸 切换到下一张: {next_record['text']}")
-            return image, "完成"
+            return image
         except Exception as e:
             print(f"❌ 加载失败: {e}")
-            return current_image, "加载失败"
+            return current_image
     
-    return current_image, "无法加载"
+    return current_image
 
 
 def init_app():
@@ -261,78 +263,71 @@ def init_app():
             current_text = last_record['text']
             current_record_id = last_record['id']
             print(f"📸 加载历史记录: {last_record['text']}")
-            return current_image, "等待生成..."
+            return current_image
         except Exception as e:
             print(f"⚠️ 加载历史记录失败: {e}")
     
     print("👋 应用初始化完成")
-    return None, "等待生成..."
+    return None
 
 
-# 创建Gradio界面
-with gr.Blocks(title="语音魔法画板", theme=gr.themes.Soft()) as app:
-    # 标题
-    gr.Markdown("# 语音魔法画板", elem_classes="title")
-    
-    # 图片展示区域（占满上方）
-    image_output = gr.Image(
-        label="",
-        type="pil",
-        height=700,
-        show_label=False
-    )
-    
-    # 进度显示（在按钮上方）
-    progress_text = gr.Textbox(
-        label="",
-        value="等待生成...",
-        interactive=False,
-        show_label=False,
-        container=False,
-        elem_classes=["progress-text"]
-    )
-    
-    # 底部按钮区域
+# 创建Gradio界面（左右布局：左侧标题+按钮，右侧图片）
+with gr.Blocks(title="语音魔法画板") as app:
     with gr.Row():
-        prev_btn = gr.Button("⬅️ 上一张", size="lg", scale=1)
-        # 录音组件（用户点击录音按钮开始/结束录音）
-        audio_input = gr.Audio(
-            label="",
-            sources=["microphone"],
-            type="numpy",
-            format="wav",
-            show_label=False,
-            container=False,
-            height=60  # 设置较小高度，只显示录音按钮
-        )
-        next_btn = gr.Button("➡️ 下一张", size="lg", scale=1)
+        # 左侧列：标题 + 按钮
+        with gr.Column(scale=1):
+            gr.Markdown("## 语音魔法画板", elem_classes="title")
+            prev_btn = gr.Button("⬅️ 上一张", size="lg")
+            audio_input = gr.Audio(
+                label="",
+                sources=["microphone"],
+                type="numpy",
+                format="wav",
+                show_label=False,
+                container=False
+            )
+            next_btn = gr.Button("➡️ 下一张", size="lg")
+        
+        # 右侧列：图片展示区域（占据主要宽度）
+        with gr.Column(scale=4):
+            image_output = gr.Image(
+                label="",
+                type="pil",
+                height=700,
+                show_label=False
+            )
     
     # 绑定事件
     # 自动处理流程：Audio组件变化时（录音完成）自动处理
     audio_input.change(
         fn=process_audio_and_generate,
         inputs=[audio_input],
-        outputs=[image_output, progress_text]
+        outputs=[image_output]
+    ).then(
+        # 处理完成后清空音频组件，恢复初始“录制”状态
+        fn=lambda: gr.update(value=None, label="🎙️ 录制"),
+        inputs=[],
+        outputs=[audio_input]
     )
     
     # 上一张/下一张按钮
     prev_btn.click(
         fn=get_previous_image,
         inputs=[],
-        outputs=[image_output, progress_text]
+        outputs=[image_output]
     )
     
     next_btn.click(
         fn=get_next_image,
         inputs=[],
-        outputs=[image_output, progress_text]
+        outputs=[image_output]
     )
     
     # 初始化
     app.load(
         fn=init_app,
         inputs=[],
-        outputs=[image_output, progress_text]
+        outputs=[image_output]
     )
 
 
@@ -350,5 +345,5 @@ if __name__ == "__main__":
         server_port=7860,
         share=False,
         inbrowser=True,
-        theme=gr.themes.Soft()
+        theme=gr.themes.Soft()  # Gradio 6.0+ 需要在这里设置主题
     )
