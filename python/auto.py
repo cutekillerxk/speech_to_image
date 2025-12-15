@@ -9,6 +9,9 @@ import time
 import shutil
 import json
 import requests
+from fastapi import FastAPI, Request, UploadFile, File
+from starlette.responses import JSONResponse
+import tempfile
 from doubao_service import doubao_service
 from history_manager import history_manager
 
@@ -18,31 +21,10 @@ BASE_DIR = os.path.dirname(__file__)
 AUDIO_DIR = os.path.join(BASE_DIR, "audio")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
-# 当前展示ID记录文件（供 7861 读取）
-CURRENT_DISPLAY_FILE = os.path.join(BASE_DIR, "history", "current_display.json")
-
 # 全局状态
 current_image = None
 current_text = ""
 current_record_id = None
-
-
-def write_current_display(record_id: int):
-    """写入当前展示的记录ID"""
-    try:
-        data = {"current_display_id": record_id}
-        with open(CURRENT_DISPLAY_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"⚠️ 写入 current_display.json 失败: {e}")
-
-
-def notify_viewer():
-    """通知 7861 端刷新，失败忽略"""
-    try:
-        requests.post("http://127.0.0.1:7861/notify", timeout=1)
-    except Exception:
-        pass
 
 
 def process_audio_and_generate(audio, progress=gr.Progress()):
@@ -77,11 +59,25 @@ def process_audio_and_generate(audio, progress=gr.Progress()):
         # 处理音频数据
         if isinstance(audio, str):
             if os.path.exists(audio):
-                filename = os.path.basename(audio)
-                dest_path = os.path.join(AUDIO_DIR, filename)
-                shutil.copyfile(audio, dest_path)
-                audio_path = dest_path
-                print(f"📁 音频文件路径: {audio_path}")
+                audio_abs = os.path.abspath(audio)
+                audio_dir_abs = os.path.abspath(AUDIO_DIR)
+                
+                # 检查文件是否已经在 audio 目录下
+                if audio_abs.startswith(audio_dir_abs):
+                    # 文件已经在 audio 目录下，直接使用
+                    audio_path = audio_abs
+                    print(f"📁 音频文件已在 audio 目录: {audio_path}")
+                else:
+                    # 文件不在 audio 目录下，需要复制
+                    filename = os.path.basename(audio)
+                    dest_path = os.path.join(AUDIO_DIR, filename)
+                    dest_abs = os.path.abspath(dest_path)
+                    
+                    # 如果源文件和目标文件是同一个文件，跳过复制
+                    if audio_abs != dest_abs:
+                        shutil.copyfile(audio, dest_path)
+                    audio_path = dest_path
+                    print(f"📁 音频文件已复制到: {audio_path}")
         elif isinstance(audio, tuple):
             sample_rate, audio_data = audio
             audio_path = os.path.join(AUDIO_DIR, f"audio_{int(time.time() * 1000)}.wav")
@@ -187,8 +183,6 @@ def process_audio_and_generate(audio, progress=gr.Progress()):
             current_image = image
             current_text = recognized_text
             current_record_id = record['id']
-            write_current_display(current_record_id)
-            notify_viewer()
             print(f"✅ 保存成功，记录ID: {current_record_id}")
         except Exception as e:
             print(f"⚠️ 保存历史记录失败: {e}")
@@ -236,8 +230,6 @@ def get_previous_image():
             current_image = image
             current_text = prev_record['text']
             current_record_id = prev_record['id']
-            write_current_display(current_record_id)
-            notify_viewer()
             print(f"📸 切换到上一张: {prev_record['text']}")
             return image
         except Exception as e:
@@ -269,8 +261,6 @@ def get_next_image():
             current_image = image
             current_text = next_record['text']
             current_record_id = next_record['id']
-            write_current_display(current_record_id)
-            notify_viewer()
             print(f"📸 切换到下一张: {next_record['text']}")
             return image
         except Exception as e:
@@ -300,23 +290,54 @@ def init_app():
     return None
 
 
+app = FastAPI()
+
+
+@app.post("/listen_click")
+async def listen_click():
+    print("🛰️ 前端触发开启监听按钮")
+    return {"status": "ok"}
+
+
+@app.post("/vad_upload")
+async def vad_upload(file: UploadFile = File(...)):
+    """
+    接收前端 VAD 录音（webm/wav），保存临时文件，复用现有处理逻辑
+    """
+    try:
+        print("🛰️ /vad_upload 收到请求")
+        suffix = ".webm"
+        filename = f"vad_{int(time.time() * 1000)}{suffix}"
+        temp_path = os.path.join(AUDIO_DIR, filename)
+        # 保存文件
+        with open(temp_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        print(f"💾 VAD 音频已保存: {temp_path}")
+        # 直接用文件路径进入现有流程（process_audio_and_generate 支持路径）
+        process_audio_and_generate(temp_path, progress=None)
+        print("✅ VAD 音频处理完成")
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"❌ VAD 上传处理失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"status": "error", "msg": str(e)}, status_code=500)
+
+
 # 创建Gradio界面（左右布局：左侧标题+按钮，右侧图片）
-with gr.Blocks(title="语音魔法画板") as app:
+with gr.Blocks(title="语音魔法画板") as demo:
     with gr.Row():
         # 左侧列：标题 + 按钮
         with gr.Column(scale=1):
             gr.Markdown("## 语音魔法画板", elem_classes="title")
             prev_btn = gr.Button("⬅️ 上一张", size="lg")
-            audio_input = gr.Audio(
-                label="",
-                sources=["microphone"],
-                type="numpy",
-                format="wav",
-                show_label=False,
-                container=False
-            )
             next_btn = gr.Button("➡️ 下一张", size="lg")
-        
+            listen_btn = gr.Button("🎙️ 开启监听", variant="primary", size="lg", elem_id="listen-btn")
+            gr.Markdown(
+                "<div id='vad-status'>未监听</div>",
+                elem_id="vad-status-container"
+            )
         # 右侧列：图片展示区域（占据主要宽度）
         with gr.Column(scale=4):
             image_output = gr.Image(
@@ -325,19 +346,6 @@ with gr.Blocks(title="语音魔法画板") as app:
                 height=700,
                 show_label=False
             )
-    
-    # 绑定事件
-    # 自动处理流程：Audio组件变化时（录音完成）自动处理
-    audio_input.change(
-        fn=process_audio_and_generate,
-        inputs=[audio_input],
-        outputs=[image_output]
-    ).then(
-        # 处理完成后清空音频组件，恢复初始“录制”状态
-        fn=lambda: gr.update(value=None, label="🎙️ 录制"),
-        inputs=[],
-        outputs=[audio_input]
-    )
     
     # 上一张/下一张按钮
     prev_btn.click(
@@ -352,11 +360,148 @@ with gr.Blocks(title="语音魔法画板") as app:
         outputs=[image_output]
     )
     
-    # 初始化
-    app.load(
+    # 注入前端JS，完成 VAD 自动录制与上传
+    # Gradio 的 js 参数必须是函数表达式，不能是顶层语句
+    vad_js = """
+() => {
+  // 所有变量挂到 window，避免 Gradio AsyncFunction 解析问题
+  window.vadState = window.vadState || {};
+  window.vadState.statusDiv = null;
+  window.vadState.audioContext = null;
+  window.vadState.mediaStream = null;
+  window.vadState.analyser = null;
+  window.vadState.processor = null;
+  window.vadState.recorder = null;
+  window.vadState.isListening = false;
+  window.vadState.isRecording = false;
+  window.vadState.chunks = [];
+  window.vadState.silenceStart = null;
+
+  window.vadConfig = {
+    THRESHOLD: 0.08,
+    SILENCE_THRESHOLD: 0.03,
+    SILENCE_DURATION: 1000
+  };
+
+  window.vadSetStatus = function (text) {
+    if (window.vadState.statusDiv) {
+      window.vadState.statusDiv.innerText = text;
+    }
+    console.log('[VAD]', text);
+  };
+
+  window.vadBindButton = function () {
+    window.vadState.statusDiv = document.getElementById('vad-status');
+    var btn = document.getElementById('listen-btn');
+
+    if (!btn) {
+      console.warn('[VAD] listen-btn not found');
+      return;
+    }
+    if (btn._vad_bound) return;
+
+    btn.addEventListener('click', function () {
+      fetch('/listen_click', { method: 'POST' }).catch(function () {});
+      window.vadStartListening();
+    });
+    btn._vad_bound = true;
+    window.vadSetStatus('点击开启监听');
+  };
+
+  window.vadStartListening = function () {
+    if (window.vadState.isListening) return;
+
+    window.vadSetStatus('申请麦克风权限...');
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      window.vadState.mediaStream = stream;
+
+      window.vadState.audioContext = new AudioContext();
+      window.vadState.audioContext.resume();
+
+      var sourceNode =
+        window.vadState.audioContext.createMediaStreamSource(stream);
+      window.vadState.analyser =
+        window.vadState.audioContext.createAnalyser();
+      window.vadState.analyser.fftSize = 2048;
+
+      window.vadState.processor =
+        window.vadState.audioContext.createScriptProcessor(2048, 1, 1);
+
+      sourceNode.connect(window.vadState.analyser);
+      window.vadState.analyser.connect(window.vadState.processor);
+      window.vadState.processor.connect(
+        window.vadState.audioContext.destination
+      );
+
+      window.vadState.recorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm'
+      });
+
+      window.vadState.recorder.ondataavailable = function (e) {
+        if (e.data && e.data.size > 0) {
+          window.vadState.chunks.push(e.data);
+        }
+      };
+
+      window.vadState.recorder.onstop = function () {
+        if (window.vadState.chunks.length === 0) return;
+
+        var blob = new Blob(window.vadState.chunks, { type: 'audio/webm' });
+        window.vadState.chunks = [];
+
+        var formData = new FormData();
+        formData.append('file', blob, 'audio.webm');
+
+        fetch('/vad_upload', { method: 'POST', body: formData });
+      };
+
+      window.vadState.processor.onaudioprocess = function () {
+        var data = new Uint8Array(window.vadState.analyser.fftSize);
+        window.vadState.analyser.getByteTimeDomainData(data);
+
+        var sum = 0;
+        for (var i = 0; i < data.length; i++) {
+          var v = data[i] / 128 - 1;
+          sum += v * v;
+        }
+        var vol = Math.sqrt(sum / data.length);
+
+        if (!window.vadState.isRecording && vol > window.vadConfig.THRESHOLD) {
+          window.vadState.recorder.start();
+          window.vadState.isRecording = true;
+          window.vadState.silenceStart = null;
+        } else if (window.vadState.isRecording && vol < window.vadConfig.SILENCE_THRESHOLD) {
+          if (window.vadState.silenceStart === null) {
+            window.vadState.silenceStart = performance.now();
+          } else if (
+            performance.now() - window.vadState.silenceStart >
+            window.vadConfig.SILENCE_DURATION
+          ) {
+            window.vadState.recorder.stop();
+            window.vadState.isRecording = false;
+            window.vadState.silenceStart = null;
+          }
+        } else {
+          window.vadState.silenceStart = null;
+        }
+      };
+
+      window.vadState.isListening = true;
+      window.vadSetStatus('监听中...');
+    });
+  };
+
+  setTimeout(window.vadBindButton, 500);
+  setTimeout(window.vadBindButton, 1500);
+}
+"""
+    
+    # 初始化并注入 JavaScript（使用 js 参数）
+    demo.load(
         fn=init_app,
         inputs=[],
-        outputs=[image_output]
+        outputs=[image_output],
+        js=vad_js
     )
 
 
@@ -366,13 +511,9 @@ if __name__ == "__main__":
         print("⚠️  未配置API_KEY，将使用模拟模式")
         print("📝 请在 .env 文件中配置API_KEY以使用真实功能")
     
-    # 启动应用
-    print("🚀 启动应用...")
-    print("📱 界面将在浏览器中自动打开")
-    app.launch(
-        server_name="127.0.0.1",
-        server_port=7860,
-        share=False,
-        inbrowser=True,
-        theme=gr.themes.Soft()  # Gradio 6.0+ 需要在这里设置主题
-    )
+    # 将 Gradio 挂载到 FastAPI
+    app = gr.mount_gradio_app(app, demo, path="/")
+    print("🚀 自动监听版启动中 (端口 7860)...")
+    import uvicorn
+
+    uvicorn.run(app, host="127.0.0.1", port=7860)
