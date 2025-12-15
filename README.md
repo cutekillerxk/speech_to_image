@@ -1,123 +1,62 @@
-# 语音驱动图片生成 Demo
+# 语音魔法画板（Python 版）
 
-一个基于豆包大模型API的语音转图片生成应用。
+基于 Gradio 的语音转图片 Demo：点击录制，自动完成“音频 → 文字 → 图片”，并保存历史记录。
 
-## 功能特性
+## 功能
+- 🎤 录音：麦克风采集音频（点击录制/结束）
+- 📝 语音转文字：Whisper-1（DMXAPI STT）
+- 🎨 文生图：默认 Gemini 3 Pro（可回退到豆包文生图）
+- 📚 历史记录：自动保存、上一张/下一张浏览
 
-- 🎤 **语音输入**: 通过麦克风录制音频
-- 📝 **语音转文字**: 调用豆包API将音频转换为文字
-- 🎨 **文字生成图片**: 根据文字描述生成图片
-- 📸 **图片展示**: 实时展示生成的图片
-- 📚 **历史记录**: 保存并浏览历史生成的图片
-- ⬆️⬇️ **历史切换**: 支持上一张/下一张切换
-
-## 技术栈
-
-### 前端
-- React 18
-- TypeScript
-- Ant Design
-- Web Audio API
-
-### 后端
-- Node.js
-- Express
-- 豆包大模型API
-
-## 项目结构
-
+## 目录
 ```
-sti/
-├── frontend/          # 前端React应用
-│   ├── src/
-│   │   ├── components/
-│   │   ├── services/
-│   │   └── App.tsx
-│   └── package.json
-├── backend/           # 后端Express服务
-│   ├── src/
-│   │   ├── routes/
-│   │   ├── services/
-│   │   └── server.js
-│   └── package.json
-├── 可行性分析.md
+speech_to_image/
+├── python/
+│   ├── onlyimg.py          # 简化版前端（录制+图片+上下张）
+│   ├── app.py              # 原始多控件版前端
+│   ├── doubao_service.py   # 语音转文字 & 文生图服务
+│   ├── history_manager.py  # 历史记录与图片持久化
+│   ├── config.py           # 配置与环境变量
+│   ├── requirements.txt    # 依赖
+│   └── history/            # 历史图片与索引
 └── README.md
 ```
 
-## 快速开始
-
-### 1. 安装依赖
-
+## 环境与依赖
 ```bash
-# 安装后端依赖
-cd backend
-npm install
-
-# 安装前端依赖
-cd ../frontend
-npm install
+conda create -n ati python=3.10
+conda activate ati
+pip install -r speech_to_image/python/requirements.txt
 ```
 
-### 2. 配置API密钥
-
-在 `backend/.env` 文件中配置豆包API密钥：
-
+## 环境变量（python/.env）
 ```env
-DOUBAO_API_KEY=your_api_key_here
-DOUBAO_API_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+DMX_API_KEY=你的_API_KEY          # 或 API_KEY
+STT_URL=https://www.dmxapi.com/v1/audio/transcriptions
+TTI_URL=https://www.dmxapi.cn/v1/images/generations
+GEMINI_BASE_URL=https://www.dmxapi.com
+GEMINI_MODEL=gemini-3-pro-image-preview
 ```
 
-### 3. 启动服务
-
+## 运行
 ```bash
-# 启动后端服务（端口3001）
-cd backend
-npm start
-
-# 启动前端服务（端口3000）
-cd frontend
-npm start
+cd speech_to_image/python
+python onlyimg.py   # 简化版：录制+上一张/下一张+图片展示
+# 或 python app.py  # 原始多控件版
 ```
 
-### 4. 访问应用
+## 使用流程（onlyimg.py）
+1. 点击录制（Audio 组件按钮开始录音，再次点击结束）
+2. 自动执行：保存音频 → 语音转文字 → 文生图 → 保存历史
+3. 图片区域更新为新图；可用“上一张/下一张”浏览历史
 
-打开浏览器访问: http://localhost:3000
+## 关键模块
+- `onlyimg.py`：Gradio 前端布局、事件绑定；录制完成触发 `process_audio_and_generate`
+- `doubao_service.py`：`audio_to_text`(Whisper-1)，`text_to_image_gemini`(Gemini)，`text_to_image`(豆包文生图)；失败时回退占位图
+- `history_manager.py`：保存 PNG、写入 `history.json`，最多 50 条；支持上一张/下一张
+- `config.py`：统一读取 API、路径、模型配置
 
-## 使用说明
-
-1. **开始录音**: 点击"开始录音"按钮，允许浏览器访问麦克风
-2. **停止录音**: 点击"停止录音"按钮，音频将发送到后端处理
-3. **查看结果**: 等待处理完成后，图片将自动显示
-4. **浏览历史**: 使用"上一张"/"下一张"按钮浏览历史记录
-5. **保存图片**: 点击图片或"下载"按钮保存图片到本地
-
-## API说明
-
-### 后端API端点
-
-- `POST /api/audio-to-image` - 接收音频，返回生成的图片
-  - 请求: FormData (包含audio文件)
-  - 响应: `{ text: string, imageUrl: string, imageData: string }`
-
-## 注意事项
-
-1. **API密钥**: 需要先在豆包平台申请API密钥
-2. **浏览器权限**: 首次使用需要允许麦克风权限
-3. **网络要求**: 需要能够访问豆包API服务
-4. **存储限制**: 历史记录存储在localStorage，有大小限制
-
-## 开发计划
-
-- [x] 项目结构搭建
-- [x] 音频录制功能
-- [x] 语音转文字API调用
-- [x] 文字生成图片API调用
-- [x] 历史记录功能
-- [ ] 错误处理和重试机制
-- [ ] 录音波形可视化
-- [ ] 后端数据库持久化
-
-## 许可证
-
-MIT
+## 注意
+- 如果 Gemini 或豆包文生图 API 返回 401，请确认 `.env` 中的密钥有对应权限。
+- 录制或生成失败时，界面保持上一张图片，不会清空。***
 
