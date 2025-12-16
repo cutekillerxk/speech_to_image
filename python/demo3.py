@@ -306,8 +306,9 @@ def process_audio_and_generate(audio, progress=gr.Progress()):
         # 开始计时：文字转图片
         tti_start_time = time.time()
         try:
-            image, recognized_text = doubao_service.text_to_image_gemini(
+            image, recognized_text = doubao_service.text_to_image(
                 current_text,
+                use_gemini=False,
                 aspect_ratio="1:1",
                 image_size="1K"
             )

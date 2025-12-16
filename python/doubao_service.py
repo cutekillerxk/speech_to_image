@@ -228,12 +228,13 @@ class DoubaoService:
             return self._mock_text_to_image(text)
         
         try:
-            # 使用配置的TTI_URL，如果没有则使用默认路径
-            api_url = self.tti_url if self.tti_url else f"{self.base_url}/images/generations"
+            # 使用配置的TTI_URL，确保使用正确的DMX API端点（与tttest.py保持一致）
+            # 默认使用 https://www.dmxapi.com/v1/images/generations
+            api_url = self.tti_url if self.tti_url else "https://www.dmxapi.com/v1/images/generations"
             
-            # 构建请求参数（根据DMX API格式）
+            # 构建请求参数（根据DMX API格式，与tttest.py保持一致）
             request_data = {
-                "model": "doubao-seedream-4-0-250828",  # 使用4.0模型，也可以使用 doubao-seedream-3-0-t2i-250415
+                "model": "doubao-seedream-4-0-250828",  # 使用4.0模型
                 "prompt": text,
                 "size": "2K",  # 支持 "1K", "2K", "4K" 或具体像素值如 "2048x2048"
                 "stream": False,
@@ -241,7 +242,7 @@ class DoubaoService:
                 "watermark": False
             }
             
-            # 构建请求头
+            # 构建请求头（与tttest.py保持一致）
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.api_key}"
@@ -250,19 +251,23 @@ class DoubaoService:
             # 调试信息
             print(f"🔗 请求URL: {api_url}")
             print(f"📝 提示词: {text[:50]}..." if len(text) > 50 else f"📝 提示词: {text}")
+            print(f"🤖 使用模型: {request_data['model']}")
             
-            # 调用豆包文生图API
+            # 调用豆包文生图API（与tttest.py的请求方式保持一致）
             response = requests.post(
                 api_url,
-                json=request_data,
                 headers=headers,
+                json=request_data,
                 timeout=120  # 图片生成可能需要更长时间
             )
             
             response.raise_for_status()
             data = response.json()
             
-            # 根据DMX API响应格式解析
+            # 调试信息：输出响应状态
+            print(f"✅ API响应成功，状态码: {response.status_code}")
+            
+            # 根据DMX API响应格式解析（与tttest.py的响应格式一致）
             # 响应格式：{"data": [{"url": "..."}]} 或 {"data": [{"b64_json": "..."}]}
             if 'data' in data and len(data['data']) > 0:
                 image_data_item = data['data'][0]
@@ -271,16 +276,21 @@ class DoubaoService:
                 
                 if image_b64:
                     # 从base64解码图片
+                    print("📥 从base64数据解码图片")
                     image_data = base64.b64decode(image_b64)
                     image = Image.open(BytesIO(image_data))
+                    print(f"✅ 图片解码成功，尺寸: {image.size}")
                     return image, text
                 elif image_url:
                     # 从URL下载图片
+                    print(f"📥 从URL下载图片: {image_url[:80]}...")
                     img_response = requests.get(image_url, timeout=30)
                     img_response.raise_for_status()
                     image = Image.open(BytesIO(img_response.content))
+                    print(f"✅ 图片下载成功，尺寸: {image.size}")
                     return image, text
                 else:
+                    print(f"❌ API响应中未找到图片数据，响应内容: {data}")
                     raise ValueError("API响应中未找到图片数据")
             else:
                 # 兼容其他可能的响应格式
