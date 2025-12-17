@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-api_key =  os.getenv("API_KEY", "")
+api_key =  os.getenv("DMX_API_KEY", "")
 
 url = "https://www.dmxapi.com/v1/audio/transcriptions"
 

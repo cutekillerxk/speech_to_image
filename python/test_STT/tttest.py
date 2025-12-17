@@ -18,7 +18,7 @@ import requests
 # 【配置项 1】DMX API 密钥
 # 说明：从环境变量获取 DMX API Key，如果没有则使用默认值
 # 建议：生产环境请务必使用环境变量，避免密钥泄露
-DMX_API_KEY = os.getenv("DMX_API_KEY") or "sk-TZMyzTFtM0WQvLx9zeR5syNje5CjqnBcNvejposx4CDLl6tC"
+DMX_API_KEY = os.getenv("DMX_API_KEY")
 
 # 【配置项 2】DMX API 端点
 url = "https://www.dmxapi.com/v1/images/generations"

@@ -25,7 +25,7 @@ import json      # JSON 处理库 - 用于解析和格式化 JSON 数据
 # ══════════════════════════════════════════════════════════════════════════════
 # API 基础配置
 # ══════════════════════════════════════════════════════════════════════════════
-
+load_dotenv()
 # API 端点地址 (Endpoint URL)
 # 说明: DMX API 的图像生成接口地址
 url = "https://www.dmxapi.com/v1/images/generations"
@@ -37,7 +37,7 @@ url = "https://www.dmxapi.com/v1/images/generations"
 # │    - 建议使用环境变量或配置文件存储敏感信息                                │
 # │    - 定期轮换 API Key 以确保安全                                         │
 # └──────────────────────────────────────────────────────────────────────────┘
-api_key = "sk-TZMyzTFtM0WQvLx9zeR5syNje5CjqnBcNvejposx4CDLl6tC"
+api_key =  os.getenv("DMX_API_KEY", "")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HTTP 请求头配置 (Request Headers)

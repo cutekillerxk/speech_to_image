@@ -11,9 +11,9 @@ from datetime import datetime
 # ============================================================================
 # 配置部分
 # ============================================================================
-
+load_dotenv()
 # DMXAPI 密钥和基础 URL
-api_key = "sk-TZMyzTFtM0WQvLx9zeR5syNje5CjqnBcNvejposx4CDLl6tC"  # 替换为你的 DMXAPI 密钥
+api_key =  os.getenv("DMX_API_KEY", "")
 BASE_URL = "https://www.dmxapi.com"
 
 # 创建 Gemini 客户端
