@@ -686,14 +686,18 @@ header, footer, .gradio-header {
 }
 
 .progress-text {
-    position: absolute;
+    position: absolute !important;
     color: #ffffff !important;
     font-size: 28px;
     font-weight: 600;
     font-family: monospace;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    text-align: center !important;
+    line-height: 1 !important;
+    margin: 0 !important;
+    padding: 0 !important;
     pointer-events: none;
     z-index: 10001;
 }
@@ -826,6 +830,15 @@ with gr.Blocks(title="语音魔法画板", css=custom_css, theme=gr.themes.Monoc
       textDiv.textContent = '0%';
       // ✅ 确保文字颜色为白色
       textDiv.style.color = '#ffffff';
+      // ✅ 确保文字居中显示在圆圈中间
+      textDiv.style.position = 'absolute';
+      textDiv.style.top = '50%';
+      textDiv.style.left = '50%';
+      textDiv.style.transform = 'translate(-50%, -50%)';
+      textDiv.style.textAlign = 'center';
+      textDiv.style.lineHeight = '1';
+      textDiv.style.margin = '0';
+      textDiv.style.padding = '0';
 
       innerDiv.appendChild(svg);
       innerDiv.appendChild(textDiv);
