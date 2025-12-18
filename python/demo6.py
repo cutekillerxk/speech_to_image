@@ -1093,6 +1093,9 @@ with gr.Blocks(title="语音魔法画板", css=custom_css, theme=gr.themes.Monoc
               console.log('[Image] ✅ 检测到新图片！ID:', data.record_id, '（上次:', lastRecordId, '）');
               clearInterval(checkIntervalId);
               
+              // ✅ 更新全局状态，记录当前图片ID，避免下次误判
+              window.vadState.lastRecordId = data.record_id;
+              
               // 进度条完成
               if (window.progressUI) {
                 window.progressUI.complete();
