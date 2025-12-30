@@ -537,8 +537,10 @@ async def get_latest_image():
         import base64
         from io import BytesIO
         
-        # ✅ 直接从历史记录读取最新图片，不依赖全局变量
+        # ✅ 重新加载历史记录（确保获取手动修改后的最新数据）
+        history_manager.history = history_manager._load_history()
         history = history_manager.get_history()
+        
         if history:
             last_record = history[-1]
             record_id = last_record['id']
@@ -706,6 +708,44 @@ header, footer, .gradio-header {
 .image-container.generating img,
 .image-container.generating canvas {
     opacity: 0.3 !important;
+}
+
+/* ===== 右下角刷新按钮 ===== */
+.refresh-latest-btn {
+    position: fixed !important;
+    bottom: 10px !important;
+    right: 10px !important;
+    width: 24px !important;
+    height: 24px !important;
+    min-width: 24px !important;
+    min-height: 24px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    border-radius: 4px !important;
+    background: rgba(0, 0, 0, 0.5) !important;
+    color: rgba(255, 255, 255, 0.8) !important;
+    font-size: 12px !important;
+    cursor: pointer !important;
+    z-index: 100000 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: all 0.2s ease !important;
+    line-height: 1 !important;
+    box-sizing: border-box !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+.refresh-latest-btn:hover {
+    background: rgba(0, 0, 0, 0.7) !important;
+    border-color: rgba(255, 255, 255, 0.5) !important;
+    color: rgba(255, 255, 255, 1) !important;
+}
+
+.refresh-latest-btn:active {
+    transform: scale(0.95) !important;
 }
 """
 
@@ -1120,7 +1160,7 @@ with gr.Blocks(title="语音魔法画板", css=custom_css, theme=gr.themes.Monoc
     
     var checkCount = 0;
     var maxChecks = 60; // 最多检查60次（约30秒）
-    var checkInterval = 500; // 每500ms检查一次
+    var checkInterval = 800 // 每1000ms检查一次
 
     var checkIntervalId = setInterval(function () {
       checkCount++;
@@ -1434,6 +1474,189 @@ with gr.Blocks(title="语音魔法画板", css=custom_css, theme=gr.themes.Monoc
 
   // 启动自动全屏
   window.autoFullscreenImage();
+
+  // ================================
+  // 右下角刷新按钮：刷新最新图片
+  // ================================
+  window.createRefreshButton = function () {
+    // 检查按钮是否已存在
+    var existingBtn = document.querySelector('.refresh-latest-btn');
+    if (existingBtn) {
+      console.log('[Refresh] 刷新按钮已存在，跳过创建');
+      return;
+    }
+
+    console.log('[Refresh] 开始创建刷新按钮...');
+
+    // 创建按钮
+    var btn = document.createElement('button');
+    btn.className = 'refresh-latest-btn';
+    btn.innerHTML = '↻';
+    btn.title = '刷新最新图片';
+    btn.setAttribute('aria-label', '刷新最新图片');
+    
+    // 强制设置样式（确保显示）
+    btn.style.position = 'fixed';
+    btn.style.bottom = '10px';
+    btn.style.right = '10px';
+    btn.style.width = '24px';
+    btn.style.height = '24px';
+    btn.style.zIndex = '100000';
+    btn.style.display = 'flex';
+    btn.style.visibility = 'visible';
+    btn.style.opacity = '1';
+
+    // 添加点击事件
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('[Refresh] 点击刷新按钮，获取最新图片...');
+      
+      // 调用 API 获取最新图片
+      fetch('/get_latest_image')
+        .then(function (response) {
+          if (!response.ok) {
+            throw new Error('HTTP ' + response.status);
+          }
+          return response.json();
+        })
+        .then(function (data) {
+          console.log('[Refresh] API 返回:', data.status);
+          
+          if (data.status === 'ok' && data.record_id && data.image_data) {
+            console.log('[Refresh] ✅ 获取到最新图片，ID:', data.record_id);
+            
+            // 更新全局状态
+            if (window.vadState) {
+              window.vadState.lastRecordId = data.record_id;
+            }
+            
+            // 更新图片显示
+            if (window.updateImageDisplay) {
+              window.updateImageDisplay(data.image_data);
+              console.log('[Refresh] ✅ 图片已更新');
+            } else {
+              console.error('[Refresh] updateImageDisplay 函数不存在');
+              // 备用方案：刷新页面
+              window.location.reload();
+            }
+          } else if (data.status === 'no_image') {
+            console.log('[Refresh] ⚠️ 暂无图片');
+            alert('暂无图片记录');
+          } else {
+            console.error('[Refresh] ❌ 获取图片失败:', data.msg || '未知错误');
+            alert('获取图片失败: ' + (data.msg || '未知错误'));
+          }
+        })
+        .catch(function (error) {
+          console.error('[Refresh] ❌ 请求失败:', error);
+          alert('刷新失败: ' + error.message);
+        });
+    });
+
+    // 添加到页面 - 尝试多个容器
+    function addButton() {
+      var added = false;
+      
+      // 方法1: 添加到 body
+      if (document.body) {
+        document.body.appendChild(btn);
+        console.log('[Refresh] ✅ 刷新按钮已添加到 body');
+        added = true;
+      }
+      
+      // 方法2: 添加到 gradio 容器
+      var gradioContainer = document.querySelector('.gradio-container');
+      if (gradioContainer && !added) {
+        gradioContainer.appendChild(btn);
+        console.log('[Refresh] ✅ 刷新按钮已添加到 gradio-container');
+        added = true;
+      }
+      
+      // 方法3: 添加到主容器
+      var mainContainer = document.querySelector('.main');
+      if (mainContainer && !added) {
+        mainContainer.appendChild(btn);
+        console.log('[Refresh] ✅ 刷新按钮已添加到 main');
+        added = true;
+      }
+      
+      if (!added) {
+        console.error('[Refresh] ❌ 无法找到合适的容器添加按钮');
+        // 最后尝试直接添加到 document.documentElement
+        if (document.documentElement) {
+          document.documentElement.appendChild(btn);
+          console.log('[Refresh] ✅ 刷新按钮已添加到 documentElement');
+        }
+      }
+      
+      // 验证按钮是否真的在 DOM 中
+      setTimeout(function() {
+        var checkBtn = document.querySelector('.refresh-latest-btn');
+        if (checkBtn) {
+          var rect = checkBtn.getBoundingClientRect();
+          console.log('[Refresh] 按钮位置验证:', {
+            exists: true,
+            visible: rect.width > 0 && rect.height > 0,
+            position: { top: rect.top, right: window.innerWidth - rect.right, bottom: window.innerHeight - rect.bottom, left: rect.left },
+            zIndex: window.getComputedStyle(checkBtn).zIndex
+          });
+        } else {
+          console.error('[Refresh] ❌ 按钮创建后未在 DOM 中找到');
+        }
+      }, 100);
+    }
+
+    // 立即尝试添加
+    if (document.body || document.documentElement) {
+      addButton();
+    } else {
+      // 如果 DOM 还没准备好，等待一下
+      var retryCount = 0;
+      var retryInterval = setInterval(function() {
+        retryCount++;
+        if (document.body || document.documentElement) {
+          clearInterval(retryInterval);
+          addButton();
+        } else if (retryCount > 20) {
+          clearInterval(retryInterval);
+          console.error('[Refresh] ❌ 等待 DOM 超时，无法创建按钮');
+        }
+      }, 100);
+    }
+  };
+
+  // 页面加载后创建刷新按钮
+  function initRefreshButton() {
+    console.log('[Refresh] 初始化刷新按钮，readyState:', document.readyState);
+    
+    // 立即尝试创建
+    setTimeout(function() {
+      window.createRefreshButton();
+    }, 500);
+    
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      setTimeout(function () {
+        window.createRefreshButton();
+      }, 1000);
+    } else {
+      window.addEventListener('load', function () {
+        setTimeout(function () {
+          window.createRefreshButton();
+        }, 1000);
+      });
+    }
+    
+    // 也监听 DOMContentLoaded
+    document.addEventListener('DOMContentLoaded', function () {
+      setTimeout(function () {
+        window.createRefreshButton();
+      }, 1000);
+    });
+  }
+
+  // 初始化刷新按钮
+  initRefreshButton();
 }
 """
     
